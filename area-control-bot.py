@@ -60,18 +60,26 @@ class AreaControlBot(object):
             self.brisk.place_armies(random_territory, 1)
 
     def attack_everything(self):
+        # Queue of territories from which we can potentially attack
         attack_queue = self.brisk.get_my_territories().keys()
 
         while attack_queue:
             my_territory = attack_queue.pop(0)
             adj_territories = self.brisk_map.graph[my_territory]
 
+            # For each of our territories, check whether the adjacent
+            # territories can be captured
             for adj_territory in adj_territories:
                 my_territories = self.brisk.get_my_territories()
                 num_armies = my_territories[my_territory]
 
+                # If we have enough armies to attack from this territory
                 if num_armies >= 2:
+                    # If this is an enemy territory
                     if adj_territory not in my_territories:
+                        # Keep attacking it until:
+                        # 1. We capture it
+                        # 2. We exhaust our attacking army
                         keepAttackingThisTerritory = True
                         while keepAttackingThisTerritory:
                             result = self.brisk.attack(my_territory,
@@ -79,13 +87,17 @@ class AreaControlBot(object):
                                                        num_armies - 1)
                             num_armies = result['attacker_territory_armies_left']
 
-                            # If we successfully captured the territory,
+                            # If we successfully captured the territory
                             if result['defender_territory_captured']:
+                                # If we have leftover armies, move them into
+                                # the newly captured territory
                                 if num_armies > 1:
                                     self.brisk.transfer_armies(my_territory,
                                                                adj_territory,
                                                                num_armies - 1)
+                                    attack_queue.append(adj_territory)
                                 keepAttackingThisTerritory = False
+                            # If we no longer have enough armies to attack
                             elif num_armies < 2:
                                 keepAttackingThisTerritory = False
 
