@@ -76,6 +76,11 @@ class Brisk(object):
         data = { 'end_turn': True, 'token': self.token }
         response = requests.post(self.url_player(self.player_id), data=json.dumps(data))
 
+    def get_all_territories(self):
+        players_url = urljoin(self.url_game, 'players')
+        response = requests.get(self.url_game)
+        return response.json()
+
     def get_history(self):
         history_url = urljoin(self.url_game, 'history')
         response = requests.get(self.url_game)
@@ -113,10 +118,23 @@ class Brisk(object):
 
 class BriskMap(object):
     def __init__(self, map_layout):
+        # Maps continent ID to Continent instance
         self.continent_map = {}
+
+        # Maps territory ID to Territory instance
         self.territory_map = {}
+
+        # Maps territory ID to the ID of the continent to which it belongs
         self.territory_to_continent_map = {}
+
+        # Graph of the world, with edges connecting territories
         self.graph = nx.Graph()
+
+        # Maps the ID of our territories to the number of armies in each
+        self.my_territories = {}
+
+        # Maps the ID of enemy territories to the number of armies in each
+        self.enemy_territories = {}
 
         for c in map_layout['continents']:
             c_id          = c['continent']
