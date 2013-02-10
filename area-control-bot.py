@@ -8,6 +8,9 @@ import time
 # External libs
 from brisk import Brisk, BriskMap, Continent, Territory
 
+DEBUG = False
+GAME_IDS = [1662058487]
+
 # Constants
 TEAM_NAME = 'KangarooUprising'
 BRISK_TOKEN = '962b3ddf0266ab0cec6ee3b399da2a54659d5ada'
@@ -45,9 +48,12 @@ class AreaControlBot(object):
 
                 self.attack_everything()
 
-                # Once we've done everything we want to do, explicitly end our
-                # turn
-                self.brisk.end_turn()
+                if not self.move_backline_armies():
+                    # Once we've done everything we want to do, explicitly end our
+                    # turn
+                    self.brisk.end_turn()
+            else:
+                print "not my turn"
 
             # Sleep before polling the server again
             time.sleep(POLL_INTERVAL_IN_SECONDS)
@@ -61,19 +67,55 @@ class AreaControlBot(object):
         if all_territories:
             my_territories = {}
             enemy_territories = {}
+            enemy_territories_per_continent = defaultdict(int)
 
             for territory in all_territories:
+                territory_id = territory['territory']
                 if territory['player'] == self.brisk.player_id:
-                    my_territories[territory['territory']] = territory['num_armies']
+                    my_territories[territory_id] = territory['num_armies']
                 else:
-                    enemy_territories[territory['territory']] = territory['num_armies']
+                    enemy_territories[territory_id] = territory['num_armies']
+                    continent_id = self.brisk_map.territory_map[territory_id].continent_id
+                    enemy_territories_per_continent[continent_id] += 1
 
             self.brisk_map.my_territories = my_territories
             self.brisk_map.enemy_territories = enemy_territories
+            self.brisk_map.enemy_territories_per_continent = enemy_territories_per_continent
 
     def place_reserves_based_on_need(self, num_reserves):
+        print "placing reserves..."
+
+        # Continents sorted by largest bonus
+        continents = sorted(self.brisk_map.continent_map.values(), key=lambda x: x.bonus, reverse=True)
+
         my_territories = self.brisk_map.my_territories
         enemy_territories = self.brisk_map.enemy_territories
+        enemy_territories_per_continent = self.brisk_map.enemy_territories_per_continent
+
+        # Check whether the enemy controls an entire continent
+        # If they do, put all our reserves at a border (if possible)
+        for continent in continents:
+            if enemy_territories_per_continent.get(continent.id, -1) == continent.size:
+                for territory in continent.territories:
+                    adj_territories = self.brisk_map.graph[territory]
+                    for adj_territory in adj_territories:
+                        if adj_territory in my_territories:
+                            self.brisk.place_armies(adj_territory, num_reserves)
+                            print "placing reserves to retake continent"
+                            return
+
+        # Check whether we're one or two territories away from securing our
+        # own continent
+        # If we are, put all our reserves within the continent (if possible)
+        for continent in continents:
+            if enemy_territories_per_continent[continent.id] > 0 and enemy_territories_per_continent[continent.id] <= 2:
+                for territory in continent.territories:
+                    adj_territories = self.brisk_map.graph[territory]
+                    for adj_territory in adj_territories:
+                        if adj_territory in my_territories:
+                            self.brisk.place_armies(adj_territory, num_reserves)
+                            print "placing reserves to secure continent"
+                            return
 
         territories_to_supply = []
 
@@ -102,14 +144,18 @@ class AreaControlBot(object):
 
             self.brisk.place_armies(territory, num_reserves_to_place)
             num_reserves -= num_reserves_to_place
+            print "placing reserves based on need"
 
         # Randomly distribute any remaining reserves across our territories
         territory_ids = my_territories.keys()
         for i in xrange(num_reserves):
             random_territory = random.choice(my_territory_ids)
             self.brisk.place_armies(random_territory, 1)
+            print "placing reserves randomly"
 
     def attack_everything(self):
+        print "attacking..."
+
         self.update_map()
 
         # Queue of territories from which we can potentially attack
@@ -122,7 +168,6 @@ class AreaControlBot(object):
             # For each of our territories, check whether the adjacent
             # territories can be captured
             for adj_territory in adj_territories:
-                self.update_map()
                 my_territories = self.brisk_map.my_territories
                 num_attacking_armies = my_territories[my_territory]
 
@@ -143,20 +188,22 @@ class AreaControlBot(object):
                         # 2. We exhaust our attacking army
                         keepAttackingThisTerritory = True
                         while keepAttackingThisTerritory:
+                            print "attacking %d from %d with %d armies" % (adj_territory, my_territory, num_attacking_armies - 1)
                             result = self.brisk.attack(my_territory,
                                                        adj_territory,
                                                        num_attacking_armies - 1)
-                            num_attacking_armies = result['attacker_territory_armies_left']
-                            num_defending_armies = result['defender_territory_armies_left']
+                            num_attacking_armies = result.get('attacker_territory_armies_left', 0)
+                            num_defending_armies = result.get('defender_territory_armies_left', 0)
 
                             # If we successfully captured the territory
                             if result['defender_territory_captured']:
                                 # If we have leftover armies, move them into
                                 # the newly captured territory
                                 if num_attacking_armies > 1:
+                                    print "transferring %d armies from %d to %d" % (num_attacking_armies, my_territory, adj_territory)
                                     self.brisk.transfer_armies(my_territory,
                                                                adj_territory,
-                                                               num_attacking_armies)
+                                                               num_attacking_armies - 1)
 
                                     attack_queue.append(adj_territory)
                                 keepAttackingThisTerritory = False
@@ -164,10 +211,36 @@ class AreaControlBot(object):
                             elif num_attacking_armies < 2:
                                 keepAttackingThisTerritory = False
 
+                        self.update_map()
+
+    def move_backline_armies(self):
+        self.update_map()
+
+        my_territories = self.brisk_map.my_territories
+        for territory in my_territories:
+            adj_territories = self.brisk_map.graph[territory]
+            adj_enemy_territories = [t for t in adj_territories if t not in my_territories]
+            if not adj_enemy_territories:
+                num_armies = my_territories[territory]
+                if num_armies > 1:
+                    random_territory = random.choice(adj_territories.keys())
+                    self.brisk.transfer_armies(territory,
+                                               random_territory,
+                                               num_armies - 1)
+                    return True
+
+        return False
+
 def main():
-    brisk = Brisk(TEAM_NAME)
-    area_control_bot = AreaControlBot(brisk)
-    area_control_bot.start_game()
+    if DEBUG:
+        brisk = Brisk(TEAM_NAME)
+        area_control_bot = AreaControlBot(brisk)
+        area_control_bot.start_game(game_id=None)
+    else:
+        for game_id in GAME_IDS:
+            brisk = Brisk(TEAM_NAME)
+            area_control_bot = AreaControlBot(brisk)
+            area_control_bot.start_game(game_id=game_id, no_bot=True)
 
 if __name__ == '__main__':
     main()

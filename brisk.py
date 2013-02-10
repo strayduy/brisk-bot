@@ -32,7 +32,11 @@ class Brisk(object):
 
         self.game_id   = json_response['game']
         self.player_id = json_response['player']
-        self.token     = json_response['token']
+
+        if token:
+            self.token = token
+        else:
+            self.token = json_response['token']
 
         self.url_game   = urljoin(self.url_root, str(self.game_id))
 
@@ -94,6 +98,8 @@ class Brisk(object):
                  'attacker'   : attacker_territory_id,
                  'num_armies' : num_armies }
         response = requests.post(attack_url, data=json.dumps(data))
+        if response.status_code != 200:
+            print "@@@ ", response.status_code, response.text
         return response.json()
 
     def place_armies(self, territory_id, num_armies):
@@ -101,6 +107,9 @@ class Brisk(object):
         data = { 'token'      : self.token,
                  'num_armies' : num_armies }
         response = requests.post(territory_url, data=json.dumps(data))
+        if response.status_code != 200:
+            print data
+            print "### ", response.status_code, response.text
 
     def transfer_armies(self, from_territory_id, to_territory_id, num_armies):
         territory_url = self.url_territory(from_territory_id)
@@ -136,6 +145,10 @@ class BriskMap(object):
         # Maps the ID of enemy territories to the number of armies in each
         self.enemy_territories = {}
 
+        # Maps the ID of a continent to the number of enemy territories in
+        # that continent
+        self.enemy_territories_per_continent = {}
+
         for c in map_layout['continents']:
             c_id          = c['continent']
             c_name        = c.get('continent_name', None)
@@ -164,6 +177,7 @@ class Continent(object):
     def __init__(self, id, territories=[], bonus=0, name=None):
         self.id = id
         self.territories = territories
+        self.size = len(territories)
         self.bonus = bonus
         self.name = name if name else 'Continent %d' % (self.id)
 
