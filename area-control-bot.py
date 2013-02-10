@@ -1,6 +1,7 @@
 #!/usr/bin/env python2.7
 
 # Standard libs
+from collections import defaultdict
 import random
 import time
 
@@ -39,7 +40,8 @@ class AreaControlBot(object):
             isMyTurn = my_status['current_turn']
             if isMyTurn:
                 # Place reserve armies
-                self.randomly_place_reserves(my_status)
+                num_reserves = my_status['num_reserves']
+                self.place_reserves_based_on_need(num_reserves)
 
                 self.attack_everything()
 
@@ -69,15 +71,42 @@ class AreaControlBot(object):
             self.brisk_map.my_territories = my_territories
             self.brisk_map.enemy_territories = enemy_territories
 
-    def randomly_place_reserves(self, my_status):
-        num_reserves = my_status['num_reserves']
+    def place_reserves_based_on_need(self, num_reserves):
+        my_territories = self.brisk_map.my_territories
+        enemy_territories = self.brisk_map.enemy_territories
 
-        # Retrieve a list of territory IDs that belong to us
-        my_territories = [t['territory'] for t in my_status['territories']]
+        territories_to_supply = []
 
-        # Randomly distribute our reserves across our territories
+        # Determine which territories need new units the most, based on
+        # surrounding enemy armies
+        for territory in my_territories:
+            adj_territories = self.brisk_map.graph[territory]
+            army_need = 0
+            for adj_territory in adj_territories:
+                army_need += my_territories.get(adj_territory, 0)
+                army_need -= enemy_territories.get(adj_territory, 0)
+            territories_to_supply.append((territory, army_need))
+
+        # Sort territories based on need
+        territories_to_supply.sort(key=lambda x: x[1])
+
+        # Distribute new armies to territories that need them the most
+        for territory, need in territories_to_supply:
+            if num_reserves <= 0:
+                break
+
+            if need < 0:
+                num_reserves_to_place = min(num_reserves, need * -1)
+            else:
+                num_reserves_to_place = 1
+
+            self.brisk.place_armies(territory, num_reserves_to_place)
+            num_reserves -= num_reserves_to_place
+
+        # Randomly distribute any remaining reserves across our territories
+        territory_ids = my_territories.keys()
         for i in xrange(num_reserves):
-            random_territory = random.choice(my_territories)
+            random_territory = random.choice(my_territory_ids)
             self.brisk.place_armies(random_territory, 1)
 
     def attack_everything(self):
