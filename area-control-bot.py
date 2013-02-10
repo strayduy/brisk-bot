@@ -8,8 +8,8 @@ import time
 # External libs
 from brisk import Brisk, BriskMap, Continent, Territory
 
-DEBUG = False
-GAME_IDS = [1662058487]
+DEBUG = True
+GAME_IDS = []
 
 # Constants
 TEAM_NAME = 'KangarooUprising'
